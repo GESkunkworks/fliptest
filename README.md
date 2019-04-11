@@ -2,6 +2,8 @@
 
 Package fliptest provides a mechanism for testing internet egress in an AWS VPC by creating a VPC Lambda via Cloudformation stack to which custom test URLs can be passed.
 
+Read the docs: [https://godoc.org/github.com/GESkunkworks/fliptest](https://godoc.org/github.com/GESkunkworks/fliptest)
+
 Sample usage:
 
 ```go
@@ -49,4 +51,50 @@ func main() {
         fmt.Println(test.GetLog())
     }
 }
+```
+
+sample output:
+
+```
+$ go run main.go
+[
+    {
+        "Name": "gopkg.in",
+        "ElapsedTimeS": 0.49933934211730957,
+        "Message": "got response code from URL",
+        "Success": true,
+        "Url": "https://gopkg.in",
+        "ResponseCode": 200
+    },
+    {
+        "Name": "google",
+        "ElapsedTimeS": 0.690319299697876,
+        "Message": "got response code from URL",
+        "Success": true,
+        "Url": "https://www.google.com",
+        "ResponseCode": 200
+    },
+    {
+        "Name": "time",
+        "ElapsedTimeS": 0.9288179874420166,
+        "Message": "got response code from URL",
+        "Success": true,
+        "Url": "https://www.nist.gov",
+        "ResponseCode": 200
+    }
+]
+starting test
+creating stack
+loading template file
+waiting on stack
+waiting on stack
+waiting on stack
+waiting on stack
+waiting on stack
+waiting on stack
+waiting on stack
+calling lambda
+tests passed
+retaining stack
+tests completed
 ```
