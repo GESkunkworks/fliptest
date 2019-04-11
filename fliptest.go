@@ -361,6 +361,9 @@ func (ft *FlipTester) Test() (err error) {
 	if !ft.RetainStack {
 		ft.log = append(ft.log, "deleting stack")
 		err = ft.deleteStack()
+		if err == nil {
+			ft.stackCreated = false
+		}
 	} else {
 		ft.log = append(ft.log, "retaining stack")
 	}
@@ -368,7 +371,6 @@ func (ft *FlipTester) Test() (err error) {
 		ft.log = append(ft.log, "errors: "+err.Error())
 		return err
 	}
-	ft.stackCreated = false
 	ft.log = append(ft.log, "tests completed")
 	return err
 }
