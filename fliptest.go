@@ -106,7 +106,7 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 		ft.stackTemplateFilename = input.StackTemplateFilename
 	} else {
 		ft.log = append(ft.log, "using existing stack")
-		ft.stackName = input.StackName
+		ft.StackName = input.StackName
 		ft.stackCreated = true
 	}
 	ft.RetainStack = input.RetainStack
@@ -147,16 +147,32 @@ type FlipTester struct {
 	vpcId                 string
 	stackPrefix           string // e.g. "ISS-GR-egress-tester-"
 	stackTemplateFilename string // e.g., "fliptest.yml"
-	TestUrls              []*TestUrl
-	TestResults           []*TestResult
-	testEvent             *lambdaEvent
-	Passed                bool
-	sess                  *session.Session
-	RetainStack           bool
-	stackCreated          bool
-	stackName             string
-	functionName          string
-	log                   []string
+
+	// Holds the list of URLs that will be passed to the
+	// lambda when the .Test() method is called.
+	TestUrls []*TestUrl
+
+	// Stores results (if any) from tests after the
+	// .Test() method has been called
+	TestResults []*TestResult
+	testEvent   *lambdaEvent
+
+	// Indicates whether or not the tests passed. The pass
+	// criteria is fixed based on whether the GET request
+	// received a 200 response and it took less than 4 seconds
+	Passed bool
+	sess   *session.Session
+
+	// Indicates whether or not the stack will be deleted after
+	// the .Test() method is called.
+	RetainStack  bool
+	stackCreated bool
+
+	// The stack name will be available here in case the tests need
+	// to be resumed later.
+	StackName    string
+	functionName string
+	log          []string
 }
 
 type lambdaEvent struct {
@@ -241,7 +257,7 @@ func (ft *FlipTester) deleteStack() (err error) {
 	svc := cloudformation.New(ft.sess)
 
 	input := &cloudformation.DeleteStackInput{
-		StackName: &ft.stackName,
+		StackName: &ft.StackName,
 	}
 	_, err = svc.DeleteStack(input)
 	return err
@@ -282,19 +298,19 @@ func (ft *FlipTester) createStack() (err error) {
 	if err != nil {
 		return err
 	}
-	ft.stackName = *response.StackId
+	ft.StackName = *response.StackId
 	duration := time.Second * time.Duration(float64(5))
 	time.Sleep(duration)
 	stackID := response.StackId
 	stack, err := ft.watchStack(stackID, 30)
-	ft.stackName = *stack.StackName
+	ft.StackName = *stack.StackName
 	return err
 }
 
 func (ft *FlipTester) getStackInfo() (err error) {
 	svc := cloudformation.New(ft.sess)
 	input := cloudformation.DescribeStacksInput{
-		StackName: &ft.stackName,
+		StackName: &ft.StackName,
 	}
 	response, err := svc.DescribeStacks(&input)
 	if err != nil {
@@ -309,11 +325,11 @@ func (ft *FlipTester) getStackInfo() (err error) {
 				return err
 			}
 		} else {
-			err = errors.New("no outputs detected on provided stackName")
+			err = errors.New("no outputs detected on provided StackName")
 			return err
 		}
 	} else {
-		err = errors.New("could not find stack with provided stackName")
+		err = errors.New("could not find stack with provided StackName")
 		return err
 	}
 	return err
