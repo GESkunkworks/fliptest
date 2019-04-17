@@ -253,7 +253,9 @@ func (ft *FlipTester) callLamda() (err error) {
 
 }
 
-func (ft *FlipTester) deleteStack() (err error) {
+// DeleteStack allows you to delete the Cloudformation
+// stack manually.
+func (ft *FlipTester) DeleteStack() (err error) {
 	svc := cloudformation.New(ft.sess)
 
 	input := &cloudformation.DeleteStackInput{
@@ -360,7 +362,7 @@ func (ft *FlipTester) Test() (err error) {
 	}
 	if !ft.RetainStack {
 		ft.log = append(ft.log, "deleting stack")
-		err = ft.deleteStack()
+		err = ft.DeleteStack()
 		if err == nil {
 			ft.stackCreated = false
 		}
