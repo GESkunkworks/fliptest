@@ -98,3 +98,16 @@ tests passed
 retaining stack
 tests completed
 ```
+
+If you want to run custom tests via the Lambda console you can create some test events in the browser. The structure for the test event is like so:
+```
+{
+    "RequestType": "RunAll",
+    "TestUrls": [
+        {
+            "Name": "test-google",
+            "Url": "https://www.google.com/"
+        }
+    ]
+}
+```
