@@ -12,7 +12,10 @@ package main
 import (
     "fmt"
     "encoding/json"
-
+	
+    "github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+    
     "github.com/GESkunkworks/fliptest"
 )
 
