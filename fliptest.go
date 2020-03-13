@@ -353,7 +353,7 @@ func (ft *FlipTester) Test() (err error) {
 	if ft.stackCreated {
 		ft.log = append(ft.log, "calling lambda")
 		err = ft.callLamda()
-		if strings.Contains(err.Error(), "Service") {
+		if err != nil {
 			for i:= 0; i < 5; i++ {
 				if strings.Contains(err.Error(), "Service") {
 					// means we got that trash service exception
