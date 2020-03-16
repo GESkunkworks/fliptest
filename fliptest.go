@@ -212,6 +212,8 @@ func (ft *FlipTester) checkResults(results []*TestResult) (ok bool) {
 	maxTime := 4.00000000
 	for _, result := range results {
 		if !result.Success || result.ElapsedTimeS > maxTime {
+			msg := fmt.Sprintf("test failed or took too long: %s", result.Url)
+			ft.log = append(ft.log, msg)
 			ok = false
 			return ok
 		}
@@ -353,18 +355,17 @@ func (ft *FlipTester) Test() (err error) {
 	if ft.stackCreated {
 		ft.log = append(ft.log, "calling lambda")
 		err = ft.callLamda()
-		if err != nil {
-			for i:= 0; i < 5; i++ {
-				if err != nil {
-					if strings.Contains(err.Error(), "Service") {
-						// means we got that trash service exception
-						// even though Cloudformation told us the lambda
-						// was ready
-						ft.log = append(ft.log, "service exception, sleeping and trying lambda again")
-						duration := time.Second * time.Duration(float64(10))
-						time.Sleep(duration)
-						err = ft.callLamda()
-					}
+		ft.log = append(ft.log, "called lambda, processing errors")
+		for i:= 0; i < 5; i++ {
+			if err != nil {
+				if strings.Contains(err.Error(), "Service") {
+					// means we got that trash service exception
+					// even though Cloudformation told us the lambda
+					// was ready
+					ft.log = append(ft.log, "service exception, sleeping and trying lambda again")
+					duration := time.Second * time.Duration(float64(10))
+					time.Sleep(duration)
+					err = ft.callLamda()
 				}
 			}
 		}
