@@ -355,16 +355,15 @@ func (ft *FlipTester) Test() (err error) {
 		err = ft.callLamda()
 		if err != nil {
 			for i:= 0; i < 5; i++ {
-				if strings.Contains(err.Error(), "Service") {
-					// means we got that trash service exception
-					// even though Cloudformation told us the lambda
-					// was ready
-					ft.log = append(ft.log, "service exception, sleeping and trying lambda again")
-					duration := time.Second * time.Duration(float64(10))
-					time.Sleep(duration)
-					err = ft.callLamda()
-					if err == nil {
-						break
+				if err != nil {
+					if strings.Contains(err.Error(), "Service") {
+						// means we got that trash service exception
+						// even though Cloudformation told us the lambda
+						// was ready
+						ft.log = append(ft.log, "service exception, sleeping and trying lambda again")
+						duration := time.Second * time.Duration(float64(10))
+						time.Sleep(duration)
+						err = ft.callLamda()
 					}
 				}
 			}
