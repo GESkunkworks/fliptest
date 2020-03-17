@@ -87,6 +87,7 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 		sess: input.Session,
 	}
 	if input.StackName == "" {
+		fmt.Println("got blank stackname, making new") // deleteme
 		// means we'll need a new stack
 		if input.SubnetId == "" {
 			err = errors.New("SubnetId is a required input field if StackName is not supplied")
@@ -112,6 +113,7 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 	ft.RetainStack = input.RetainStack
 	le := lambdaEvent{}
 	ft.testEvent = &le
+	fmt.Println("testing for number of tests") // deleteme
 	if len(input.TestUrls) < 1 {
 		// setup some defaults
 		ft.testEvent.RequestType = "RunAll"
@@ -134,6 +136,7 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 			},
 		}[0])
 	} else {
+		fmt.Println("got custom testurls") // deleteme
 		ft.testEvent.RequestType = "RunAll"
 		ft.testEvent.TestUrls = input.TestUrls
 	}
@@ -222,11 +225,13 @@ func (ft *FlipTester) checkResults(results []*TestResult) (ok bool) {
 }
 
 func (ft *FlipTester) callLamda() (err error) {
+	ft.log = append(ft.log, "inside callLamda")
 	// first make sure required info is retrieved from stack
 	err = ft.getStackInfo()
 	if err != nil {
 		return err
 	}
+	ft.log = append(ft.log, "preparing test event")
 	payload, err := json.Marshal(ft.testEvent)
 	if err != nil {
 		return err
@@ -236,6 +241,7 @@ func (ft *FlipTester) callLamda() (err error) {
 		InvocationType: &[]string{"RequestResponse"}[0],
 		Payload:        payload,
 	}
+	ft.log = append(ft.log, "invoking lambda")
 	svcL := lambda.New(ft.sess)
 	response, err := svcL.Invoke(&inputInvoke)
 	if err != nil {
@@ -245,7 +251,7 @@ func (ft *FlipTester) callLamda() (err error) {
 	if err != nil {
 		return err
 	}
-
+	ft.log = append(ft.log, "checking results for timing")
 	if !ft.checkResults(ft.TestResults) {
 		err = errors.New("tests failed or took too long")
 	} else {
