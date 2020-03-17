@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/lambda"
 )
 
+
 // Unless overridden using FlipTesterInput the stack will
 // be prefixed with this and a random number will be added to the end.
 const DefaultStackPrefix string = "ISS-GR-egress-tester-"
@@ -222,11 +223,13 @@ func (ft *FlipTester) checkResults(results []*TestResult) (ok bool) {
 }
 
 func (ft *FlipTester) callLamda() (err error) {
+	ft.log = append(ft.log, "inside callLamda")
 	// first make sure required info is retrieved from stack
 	err = ft.getStackInfo()
 	if err != nil {
 		return err
 	}
+	ft.log = append(ft.log, "preparing test event")
 	payload, err := json.Marshal(ft.testEvent)
 	if err != nil {
 		return err
@@ -236,6 +239,7 @@ func (ft *FlipTester) callLamda() (err error) {
 		InvocationType: &[]string{"RequestResponse"}[0],
 		Payload:        payload,
 	}
+	ft.log = append(ft.log, "invoking lambda")
 	svcL := lambda.New(ft.sess)
 	response, err := svcL.Invoke(&inputInvoke)
 	if err != nil {
@@ -355,6 +359,7 @@ func (ft *FlipTester) Test() (err error) {
 	if ft.stackCreated {
 		ft.log = append(ft.log, "calling lambda")
 		err = ft.callLamda()
+		ft.log = append(ft.log, "called lambda, processing errors")
 		for i:= 0; i < 5; i++ {
 			if err != nil {
 				if strings.Contains(err.Error(), "Service") {
