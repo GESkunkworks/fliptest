@@ -357,6 +357,9 @@ func (ft *FlipTester) Test() (err error) {
 		ft.stackCreated = true
 	}
 	if ft.stackCreated {
+        duration := time.Second * time.Duration(float64(40))
+		ft.log = append(ft.log, "sleeping 40 seconds before calling lambda")
+		time.Sleep(duration)
 		ft.log = append(ft.log, "calling lambda")
 		err = ft.callLamda()
 		ft.log = append(ft.log, "called lambda, processing errors")
