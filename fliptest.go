@@ -239,6 +239,9 @@ func (ft *FlipTester) callLamda() (err error) {
 		InvocationType: &[]string{"RequestResponse"}[0],
 		Payload:        payload,
 	}
+	ft.log = append(ft.log, "sleeping 20s before invoking lambda")
+	duration := time.Second * time.Duration(float64(20))
+	time.Sleep(duration)
 	ft.log = append(ft.log, "invoking lambda")
 	svcL := lambda.New(ft.sess)
 	response, err := svcL.Invoke(&inputInvoke)
@@ -283,9 +286,10 @@ func (ft *FlipTester) createStack() (err error) {
 	// get random number to add into stack name
 	rand.Seed(time.Now().UnixNano())
 	rando := fmt.Sprintf("%08d", rand.Intn(10000000))
+	stackName := ft.stackPrefix + rando
 	input := &cloudformation.CreateStackInput{
-		TimeoutInMinutes: &[]int64{3}[0],
-		StackName:        &[]string{ft.stackPrefix + rando}[0],
+		TimeoutInMinutes: &[]int64{5}[0],
+		StackName:        &stackName,
 		TemplateBody:     &templateBody,
 		Capabilities: []*string{
 			&[]string{"CAPABILITY_IAM"}[0],
@@ -302,6 +306,8 @@ func (ft *FlipTester) createStack() (err error) {
 			},
 		},
 	}
+	msg := fmt.Sprintf("creating stack with name '%s'", stackName)
+	ft.log = append(ft.log, msg)
 	response, err := svc.CreateStack(input)
 	if err != nil {
 		return err
@@ -444,7 +450,7 @@ func (ft *FlipTester) watchStack(
 			err = errors.New("not enough stacks in describe")
 			return stack, err
 		}
-		duration := time.Second * time.Duration(float64(5))
+		duration := time.Second * time.Duration(float64(10))
 		time.Sleep(duration)
 	}
 	return stack, err
