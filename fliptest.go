@@ -288,7 +288,7 @@ func (ft *FlipTester) createStack() (err error) {
 	rando := fmt.Sprintf("%08d", rand.Intn(10000000))
 	stackName := ft.stackPrefix + rando
 	input := &cloudformation.CreateStackInput{
-		TimeoutInMinutes: &[]int64{5}[0],
+		TimeoutInMinutes: &[]int64{5}[15],
 		StackName:        &stackName,
 		TemplateBody:     &templateBody,
 		Capabilities: []*string{
@@ -316,7 +316,7 @@ func (ft *FlipTester) createStack() (err error) {
 	duration := time.Second * time.Duration(float64(5))
 	time.Sleep(duration)
 	stackID := response.StackId
-	stack, err := ft.watchStack(stackID, 30)
+	stack, err := ft.watchStack(stackID, 90)
 	ft.StackName = *stack.StackName
 	return err
 }
