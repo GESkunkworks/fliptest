@@ -274,7 +274,7 @@ func (ft *FlipTester) DeleteStack() (err error) {
 	return err
 }
 
-func (ft *FlipTester) createStack() (err error) {
+func (ft *FlipTester) CreateStack() (err error) {
 	svc := cloudformation.New(ft.sess)
 
 	// try to read in the template file
@@ -355,7 +355,7 @@ func (ft *FlipTester) Test() (err error) {
 	ft.log = append(ft.log, "starting test")
 	if !ft.stackCreated {
 		ft.log = append(ft.log, "creating stack")
-		err = ft.createStack()
+		err = ft.CreateStack()
 		if err != nil {
 			return err
 		}
