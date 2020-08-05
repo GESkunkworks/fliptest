@@ -287,8 +287,10 @@ func (ft *FlipTester) CreateStack() (err error) {
 	rand.Seed(time.Now().UnixNano())
 	rando := fmt.Sprintf("%08d", rand.Intn(10000000))
 	stackName := ft.stackPrefix + rando
+	var tInt int64
+	tInt = 15
 	input := &cloudformation.CreateStackInput{
-		TimeoutInMinutes: &[]int64{15}[0],
+		TimeoutInMinutes: &tInt,
 		StackName:        &stackName,
 		TemplateBody:     &templateBody,
 		Capabilities: []*string{
