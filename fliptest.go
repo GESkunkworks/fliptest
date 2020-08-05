@@ -210,7 +210,7 @@ func (ft *FlipTester) getTemplateBody() (body string, err error) {
 
 func (ft *FlipTester) checkResults(results []*TestResult) (ok bool) {
 	ok = true
-	maxTime := 4.00000000
+	maxTime := 6.00000000
 	for _, result := range results {
 		if !result.Success || result.ElapsedTimeS > maxTime {
 			msg := fmt.Sprintf("test failed or took too long: %s", result.Url)
