@@ -1,6 +1,6 @@
 package fliptest
 
-const defaultTemplate string = `
+const ignoreSSLTemplate string = `
 ---
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Stack to launch a vpc lambda to test Internet in a VPC'
