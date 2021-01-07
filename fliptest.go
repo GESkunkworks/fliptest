@@ -17,7 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/lambda"
 )
 
-
 // Unless overridden using FlipTesterInput the stack will
 // be prefixed with this and a random number will be added to the end.
 const DefaultStackPrefix string = "ISS-GR-egress-tester-"
@@ -208,18 +207,25 @@ func (ft *FlipTester) getTemplateBody() (body string, err error) {
 	return string(bodyBytes), err
 }
 
-func (ft *FlipTester) checkResults(results []*TestResult) (ok bool) {
+func (ft *FlipTester) checkResults(results []*TestResult) (ok bool, err error) {
 	ok = true
 	maxTime := 6.00000000
 	for _, result := range results {
-		if !result.Success || result.ElapsedTimeS > maxTime {
-			msg := fmt.Sprintf("test failed or took too long: %s", result.Url)
+		if !result.Success {
+			msg := fmt.Sprintf("test failed: %s", result.Url)
 			ft.log = append(ft.log, msg)
+			err = errors.New(msg)
 			ok = false
-			return ok
+			return ok, err
+		} else if result.ElapsedTimeS > maxTime {
+			msg := fmt.Sprintf("test took too long: %s", result.Url)
+			ft.log = append(ft.log, msg)
+			err = errors.New(msg)
+			ok = false
+			return ok, err
 		}
 	}
-	return ok
+	return ok, err
 }
 
 func (ft *FlipTester) callLamda() (err error) {
@@ -253,11 +259,11 @@ func (ft *FlipTester) callLamda() (err error) {
 		return err
 	}
 	ft.log = append(ft.log, "checking results for timing")
-	if !ft.checkResults(ft.TestResults) {
+	_, err = ft.checkResults(ft.TestResults)
+	if err != nil {
 		err = errors.New("tests failed or took too long")
-	} else {
-		ft.log = append(ft.log, "tests passed")
 	}
+	ft.log = append(ft.log, "tests passed")
 	return err
 
 }
@@ -287,8 +293,9 @@ func (ft *FlipTester) createStack() (err error) {
 	rand.Seed(time.Now().UnixNano())
 	rando := fmt.Sprintf("%08d", rand.Intn(10000000))
 	stackName := ft.stackPrefix + rando
+	timeoutMinutes := int64(15)
 	input := &cloudformation.CreateStackInput{
-		TimeoutInMinutes: &[]int64{15}[],
+		TimeoutInMinutes: &timeoutMinutes,
 		StackName:        &stackName,
 		TemplateBody:     &templateBody,
 		Capabilities: []*string{
@@ -363,13 +370,13 @@ func (ft *FlipTester) Test() (err error) {
 		ft.stackCreated = true
 	}
 	if ft.stackCreated {
-        duration := time.Second * time.Duration(float64(40))
+		duration := time.Second * time.Duration(float64(40))
 		ft.log = append(ft.log, "sleeping 40 seconds before calling lambda")
 		time.Sleep(duration)
 		ft.log = append(ft.log, "calling lambda")
 		err = ft.callLamda()
 		ft.log = append(ft.log, "called lambda, processing errors")
-		for i:= 0; i < 5; i++ {
+		for i := 0; i < 5; i++ {
 			if err != nil {
 				if strings.Contains(err.Error(), "Service") {
 					// means we got that trash service exception
