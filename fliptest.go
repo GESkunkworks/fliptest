@@ -69,6 +69,24 @@ type FlipTesterInput struct {
 	// process. If no session is provided then
 	// one will be created using system defaults.
 	Session *session.Session
+
+	// The context that will be added to all log
+	// messages. Generally the account name
+	// or something similar
+	Context string
+
+	// How long the tester should sleep (in seconds)
+	// before attempting to call the lambda after
+	// it detects the stack is created. In some
+	// regions this can take up to 40 seconds.
+	// Default: 40 Seconds
+	InitialSleepTimeSeconds int
+
+	// How long after creating the test event
+	// to sleep (in seconds). Sometimes these
+	// VPC lambdas need a little extra time.
+	// Default: 20 Seconds
+	PostEventSleepTimeSeconds int
 }
 
 // New returns an instance of FlipTester provided a prebuilt
@@ -86,6 +104,18 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 	ft := FlipTester{
 		sess: input.Session,
 	}
+	if input.Context == "" {
+		input.Context = "Default"
+	}
+	ft.context = input.Context
+	if input.InitialSleepTimeSeconds == 0 {
+		input.InitialSleepTimeSeconds = 40
+	}
+	ft.initialSleepTimeSeconds = input.InitialSleepTimeSeconds
+	if input.PostEventSleepTimeSeconds == 0 {
+		input.PostEventSleepTimeSeconds = 20
+	}
+	ft.postEventSleepTimeSeconds = input.PostEventSleepTimeSeconds
 	if input.StackName == "" {
 		// means we'll need a new stack
 		if input.SubnetId == "" {
@@ -105,7 +135,8 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 		}
 		ft.stackTemplateFilename = input.StackTemplateFilename
 	} else {
-		ft.log = append(ft.log, "using existing stack")
+		msg := "using existing stack"
+		ft.logMessage(msg)
 		ft.StackName = input.StackName
 		ft.stackCreated = true
 	}
@@ -170,9 +201,12 @@ type FlipTester struct {
 
 	// The stack name will be available here in case the tests need
 	// to be resumed later.
-	StackName    string
-	functionName string
-	log          []string
+	StackName                 string
+	functionName              string
+	log                       []string
+	context                   string // identifier used in logging e.g. account name
+	initialSleepTimeSeconds   int    // how long after stack is "ready" to sleep
+	postEventSleepTimeSeconds int    // how long after test event creation to sleep
 }
 
 type lambdaEvent struct {
@@ -198,6 +232,15 @@ type TestUrl struct {
 	Url  string
 }
 
+func (ft *FlipTester) logMessage(msg string) {
+	t := time.Now()
+	tString := t.Format(time.RFC3339)
+	rMsg := fmt.Sprintf("%s: Context: '%s', StackName: '%s', Message: '%s'",
+		tString, ft.context, ft.StackName, msg,
+	)
+	ft.log = append(ft.log, rMsg)
+}
+
 func (ft *FlipTester) getTemplateBody() (body string, err error) {
 	var bodyBytes []byte
 	if ft.stackTemplateFilename == "" {
@@ -213,13 +256,13 @@ func (ft *FlipTester) checkResults(results []*TestResult) (ok bool, err error) {
 	for _, result := range results {
 		if !result.Success {
 			msg := fmt.Sprintf("test failed: %s", result.Url)
-			ft.log = append(ft.log, msg)
+			ft.logMessage(msg)
 			err = errors.New(msg)
 			ok = false
 			return ok, err
 		} else if result.ElapsedTimeS > maxTime {
 			msg := fmt.Sprintf("test took too long: %s", result.Url)
-			ft.log = append(ft.log, msg)
+			ft.logMessage(msg)
 			err = errors.New(msg)
 			ok = false
 			return ok, err
@@ -229,13 +272,15 @@ func (ft *FlipTester) checkResults(results []*TestResult) (ok bool, err error) {
 }
 
 func (ft *FlipTester) callLamda() (err error) {
-	ft.log = append(ft.log, "inside callLamda")
+	msg := "inside callLambda"
+	ft.logMessage(msg)
 	// first make sure required info is retrieved from stack
 	err = ft.getStackInfo()
 	if err != nil {
 		return err
 	}
-	ft.log = append(ft.log, "preparing test event")
+	msg = "preparing test event"
+	ft.logMessage(msg)
 	payload, err := json.Marshal(ft.testEvent)
 	if err != nil {
 		return err
@@ -245,10 +290,13 @@ func (ft *FlipTester) callLamda() (err error) {
 		InvocationType: &[]string{"RequestResponse"}[0],
 		Payload:        payload,
 	}
-	ft.log = append(ft.log, "sleeping 20s before invoking lambda")
-	duration := time.Second * time.Duration(float64(20))
+
+	msg = fmt.Sprintf("sleeping %ds before invoking lambda", ft.postEventSleepTimeSeconds)
+	ft.logMessage(msg)
+	duration := time.Second * time.Duration(float64(ft.postEventSleepTimeSeconds))
 	time.Sleep(duration)
-	ft.log = append(ft.log, "invoking lambda")
+	msg = "invoking lambda"
+	ft.logMessage(msg)
 	svcL := lambda.New(ft.sess)
 	response, err := svcL.Invoke(&inputInvoke)
 	if err != nil {
@@ -258,12 +306,14 @@ func (ft *FlipTester) callLamda() (err error) {
 	if err != nil {
 		return err
 	}
-	ft.log = append(ft.log, "checking results for timing")
+	msg = "checking results for timing"
+	ft.logMessage(msg)
 	_, err = ft.checkResults(ft.TestResults)
 	if err != nil {
 		err = errors.New("tests failed or took too long")
 	}
-	ft.log = append(ft.log, "tests passed")
+	msg = "tests passed"
+	ft.logMessage(msg)
 	return err
 
 }
@@ -280,11 +330,15 @@ func (ft *FlipTester) DeleteStack() (err error) {
 	return err
 }
 
+// CreateStack takes the current fliptest session information and
+// creates the test stack in the desired VPC/Subnet. It blocks
+// until the stack is fully created and ready and returns any errors.
 func (ft *FlipTester) CreateStack() (err error) {
 	svc := cloudformation.New(ft.sess)
 
 	// try to read in the template file
-	ft.log = append(ft.log, "loading template file")
+	msg := "loading template file"
+	ft.logMessage(msg)
 	templateBody, err := ft.getTemplateBody()
 	if err != nil {
 		return err
@@ -314,8 +368,8 @@ func (ft *FlipTester) CreateStack() (err error) {
 			},
 		},
 	}
-	msg := fmt.Sprintf("creating stack with name '%s'", stackName)
-	ft.log = append(ft.log, msg)
+	msg = fmt.Sprintf("creating stack with name '%s'", stackName)
+	ft.logMessage(msg)
 	response, err := svc.CreateStack(input)
 	if err != nil {
 		return err
@@ -325,7 +379,11 @@ func (ft *FlipTester) CreateStack() (err error) {
 	time.Sleep(duration)
 	stackID := response.StackId
 	stack, err := ft.watchStack(stackID, 90)
+	if err != nil {
+		return err
+	}
 	ft.StackName = *stack.StackName
+	ft.stackCreated = true
 	return err
 }
 
@@ -360,30 +418,34 @@ func (ft *FlipTester) getStackInfo() (err error) {
 // Test sets up the Cloudformation stack from template and then calls
 // the created function and parses the results.
 func (ft *FlipTester) Test() (err error) {
-	ft.log = append(ft.log, "starting test")
+	msg := "starting test"
+	ft.logMessage(msg)
 	if !ft.stackCreated {
-		ft.log = append(ft.log, "creating stack")
+		msg = "stack doesn't exist yet, creating stack"
+		ft.logMessage(msg)
 		err = ft.CreateStack()
 		if err != nil {
 			return err
 		}
-		// flag that the stack exists
-		ft.stackCreated = true
 	}
 	if ft.stackCreated {
-		duration := time.Second * time.Duration(float64(40))
-		ft.log = append(ft.log, "sleeping 40 seconds before calling lambda")
+		duration := time.Second * time.Duration(float64(ft.initialSleepTimeSeconds))
+		msg = fmt.Sprintf("sleeping %d seconds before calling lambda", ft.initialSleepTimeSeconds)
+		ft.logMessage(msg)
 		time.Sleep(duration)
-		ft.log = append(ft.log, "calling lambda")
+		msg = "calling lambda"
+		ft.logMessage(msg)
 		err = ft.callLamda()
-		ft.log = append(ft.log, "called lambda, processing errors")
+		msg = "called lambda, processing errors"
+		ft.logMessage(msg)
 		for i := 0; i < 5; i++ {
 			if err != nil {
 				if strings.Contains(err.Error(), "Service") {
 					// means we got that trash service exception
 					// even though Cloudformation told us the lambda
 					// was ready
-					ft.log = append(ft.log, "service exception, sleeping and trying lambda again")
+					msg = "service exception, sleeping and trying lambda again"
+					ft.logMessage(msg)
 					duration := time.Second * time.Duration(float64(10))
 					time.Sleep(duration)
 					err = ft.callLamda()
@@ -396,19 +458,23 @@ func (ft *FlipTester) Test() (err error) {
 		ft.Passed = true
 	}
 	if !ft.RetainStack {
-		ft.log = append(ft.log, "deleting stack")
+		msg = "deleting stack"
+		ft.logMessage(msg)
 		err = ft.DeleteStack()
 		if err == nil {
 			ft.stackCreated = false
 		}
 	} else {
-		ft.log = append(ft.log, "retaining stack")
+		msg = "retaining stack"
+		ft.logMessage(msg)
 	}
 	if err != nil {
-		ft.log = append(ft.log, "errors: "+err.Error())
+		msg := fmt.Sprintf("errors: %s", err.Error())
+		ft.logMessage(msg)
 		return err
 	}
-	ft.log = append(ft.log, "tests completed")
+	msg = "tests complete"
+	ft.logMessage(msg)
 	return err
 }
 
@@ -432,7 +498,8 @@ func (ft *FlipTester) watchStack(
 		if count > maxtries {
 			break
 		}
-		ft.log = append(ft.log, "waiting on stack")
+		msg := "waiting on stack"
+		ft.logMessage(msg)
 
 		result, err := svc.DescribeStacks(&input)
 		if err != nil {
