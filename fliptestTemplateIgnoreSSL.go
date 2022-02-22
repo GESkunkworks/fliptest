@@ -87,7 +87,7 @@ Resources:
         Fn::GetAtt:
         - LambdaExecutionRole
         - Arn
-      Runtime: python3.6 
+      Runtime: python3.9
       Timeout: '30'
       VpcConfig:
         SecurityGroupIds:
