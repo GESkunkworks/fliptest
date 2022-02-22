@@ -14,8 +14,7 @@ import (
 // This example resumes an existing stack and changes
 // the test URLs that it's calling on the lambda.
 func ExampleNew_resumestackcustomtests() {
-	var sess *session.Session
-	sess = session.New()
+	sess := session.Must(session.NewSession())
 	// if you retained the stack previously you can resume it
 	// if you know the name
 	var tests []*fliptest.TestUrl
@@ -54,8 +53,7 @@ func ExampleNew_resumestackcustomtests() {
 // and retains it for future use.
 func ExampleNew_newstack() {
 	// setup session for flippage
-	var sess *session.Session
-	sess = session.Must(session.NewSessionWithOptions(session.Options{
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		Config:  aws.Config{Region: aws.String("us-east-1")},
 		Profile: "account1",
 	}))
