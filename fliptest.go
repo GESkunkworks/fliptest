@@ -4,6 +4,7 @@
 package fliptest
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,8 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
+	"github.com/aws/aws-sdk-go/service/cloudformation/cloudformationiface"
 	"github.com/aws/aws-sdk-go/service/lambda"
 )
 
@@ -97,12 +101,16 @@ type FlipTesterInput struct {
 // .TestResults with the results. The .TestEvent.TestUrls slice can
 // be modified directly with custom tests before calling .Test() any
 // errors will be returned.
-func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
+func New(input *FlipTesterInput) (ft *FlipTester, err error) {
 	if input.Session == nil {
-		fliptester.sess = session.New()
+		input.Session, err = session.NewSession()
+		if err != nil {
+			return nil, err
+		}
 	}
-	ft := FlipTester{
-		sess: input.Session,
+	ft = &FlipTester{
+		sess:  input.Session,
+		cfSvc: cloudformation.New(input.Session),
 	}
 	if input.Context == "" {
 		input.Context = "Default"
@@ -120,12 +128,12 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 		// means we'll need a new stack
 		if input.SubnetId == "" {
 			err = errors.New("SubnetId is a required input field if StackName is not supplied")
-			return fliptester, err
+			return nil, err
 		}
 		ft.subnetId = input.SubnetId
 		if input.VpcId == "" {
 			err = errors.New("VpcId is a required input field if StackName is not supplied")
-			return fliptester, err
+			return nil, err
 		}
 		ft.vpcId = input.VpcId
 		if input.StackPrefix == "" {
@@ -141,34 +149,28 @@ func New(input *FlipTesterInput) (fliptester *FlipTester, err error) {
 		ft.stackCreated = true
 	}
 	ft.RetainStack = input.RetainStack
-	le := lambdaEvent{}
-	ft.testEvent = &le
+	ft.testEvent = &lambdaEvent{
+		RequestType: "RunAll",
+		TestUrls:    input.TestUrls,
+	}
 	if len(input.TestUrls) < 1 {
 		// setup some defaults
-		ft.testEvent.RequestType = "RunAll"
-		ft.testEvent.TestUrls = append(ft.testEvent.TestUrls, &[]TestUrl{
-			{
+		ft.testEvent.TestUrls = append(ft.testEvent.TestUrls,
+			&TestUrl{
 				Name: "gopkg.in",
 				Url:  "https://gopkg.in",
 			},
-		}[0])
-		ft.testEvent.TestUrls = append(ft.testEvent.TestUrls, &[]TestUrl{
-			{
+			&TestUrl{
 				Name: "google",
 				Url:  "https://www.google.com",
 			},
-		}[0])
-		ft.testEvent.TestUrls = append(ft.testEvent.TestUrls, &[]TestUrl{
-			{
+			&TestUrl{
 				Name: "time",
 				Url:  "https://www.nist.gov",
 			},
-		}[0])
-	} else {
-		ft.testEvent.RequestType = "RunAll"
-		ft.testEvent.TestUrls = input.TestUrls
+		)
 	}
-	return &ft, err
+	return ft, nil
 }
 
 // FlipTester is object that is created and its methods are called
@@ -190,9 +192,10 @@ type FlipTester struct {
 
 	// Indicates whether or not the tests passed. The pass
 	// criteria is fixed based on whether the GET request
-	// received a 200 response and it took less than 4 seconds
+	// received a 200 response and it took less than 6 seconds
 	Passed bool
 	sess   *session.Session
+	cfSvc  cloudformationiface.CloudFormationAPI
 
 	// Indicates whether or not the stack will be deleted after
 	// the .Test() method is called.
@@ -250,25 +253,25 @@ func (ft *FlipTester) getTemplateBody() (body string, err error) {
 	return string(bodyBytes), err
 }
 
-func (ft *FlipTester) checkResults(results []*TestResult) (ok bool, err error) {
-	ok = true
+func (ft *FlipTester) checkResults(results []*TestResult) error {
 	maxTime := 6.00000000
+	if len(results) < 1 {
+		msg := "tests failed; no test results to check"
+		ft.logMessage(msg)
+		return errors.New(msg)
+	}
 	for _, result := range results {
 		if !result.Success {
 			msg := fmt.Sprintf("test failed: %s", result.Url)
 			ft.logMessage(msg)
-			err = errors.New(msg)
-			ok = false
-			return ok, err
+			return errors.New(msg)
 		} else if result.ElapsedTimeS > maxTime {
 			msg := fmt.Sprintf("test took too long: %s", result.Url)
 			ft.logMessage(msg)
-			err = errors.New(msg)
-			ok = false
-			return ok, err
+			return errors.New(msg)
 		}
 	}
-	return ok, err
+	return nil
 }
 
 func (ft *FlipTester) callLamda() (err error) {
@@ -287,14 +290,13 @@ func (ft *FlipTester) callLamda() (err error) {
 	}
 	inputInvoke := lambda.InvokeInput{
 		FunctionName:   &ft.functionName,
-		InvocationType: &[]string{"RequestResponse"}[0],
+		InvocationType: aws.String("RequestResponse"),
 		Payload:        payload,
 	}
 
 	msg = fmt.Sprintf("sleeping %ds before invoking lambda", ft.postEventSleepTimeSeconds)
 	ft.logMessage(msg)
-	duration := time.Second * time.Duration(float64(ft.postEventSleepTimeSeconds))
-	time.Sleep(duration)
+	time.Sleep(time.Second * time.Duration(ft.postEventSleepTimeSeconds))
 	msg = "invoking lambda"
 	ft.logMessage(msg)
 	svcL := lambda.New(ft.sess)
@@ -308,25 +310,23 @@ func (ft *FlipTester) callLamda() (err error) {
 	}
 	msg = "checking results for timing"
 	ft.logMessage(msg)
-	_, err = ft.checkResults(ft.TestResults)
+	err = ft.checkResults(ft.TestResults)
 	if err != nil {
-		err = errors.New("tests failed or took too long")
+		return err
 	}
 	msg = "tests passed"
 	ft.logMessage(msg)
-	return err
+	return nil
 
 }
 
 // DeleteStack allows you to delete the Cloudformation
 // stack manually.
 func (ft *FlipTester) DeleteStack() (err error) {
-	svc := cloudformation.New(ft.sess)
-
 	input := &cloudformation.DeleteStackInput{
 		StackName: &ft.StackName,
 	}
-	_, err = svc.DeleteStack(input)
+	_, err = ft.cfSvc.DeleteStack(input)
 	return err
 }
 
@@ -334,8 +334,6 @@ func (ft *FlipTester) DeleteStack() (err error) {
 // creates the test stack in the desired VPC/Subnet. It blocks
 // until the stack is fully created and ready and returns any errors.
 func (ft *FlipTester) CreateStack() (err error) {
-	svc := cloudformation.New(ft.sess)
-
 	// try to read in the template file
 	msg := "loading template file"
 	ft.logMessage(msg)
@@ -345,40 +343,35 @@ func (ft *FlipTester) CreateStack() (err error) {
 	}
 	// get random number to add into stack name
 	rand.Seed(time.Now().UnixNano())
-	rando := fmt.Sprintf("%08d", rand.Intn(10000000))
-	stackName := ft.stackPrefix + rando
-	var tInt int64
-	tInt = 15
+	stackName := ft.stackPrefix + fmt.Sprintf("%08d", rand.Intn(10000000))
 	input := &cloudformation.CreateStackInput{
-		TimeoutInMinutes: &tInt,
+		TimeoutInMinutes: aws.Int64(15),
 		StackName:        &stackName,
 		TemplateBody:     &templateBody,
+		OnFailure:        aws.String("DO_NOTHING"),
 		Capabilities: []*string{
-			&[]string{"CAPABILITY_IAM"}[0],
-			&[]string{"CAPABILITY_NAMED_IAM"}[0],
+			aws.String("CAPABILITY_IAM"),
+			aws.String("CAPABILITY_NAMED_IAM"),
 		},
 		Parameters: []*cloudformation.Parameter{
 			{
-				ParameterKey:   &[]string{"SubnetId"}[0],
-				ParameterValue: &[]string{ft.subnetId}[0],
+				ParameterKey:   aws.String("SubnetId"),
+				ParameterValue: &ft.subnetId,
 			},
 			{
-				ParameterKey:   &[]string{"VpcId"}[0],
-				ParameterValue: &[]string{ft.vpcId}[0],
+				ParameterKey:   aws.String("VpcId"),
+				ParameterValue: &ft.vpcId,
 			},
 		},
 	}
 	msg = fmt.Sprintf("creating stack with name '%s'", stackName)
 	ft.logMessage(msg)
-	response, err := svc.CreateStack(input)
+	response, err := ft.cfSvc.CreateStack(input)
 	if err != nil {
 		return err
 	}
 	ft.StackName = *response.StackId
-	duration := time.Second * time.Duration(float64(5))
-	time.Sleep(duration)
-	stackID := response.StackId
-	stack, err := ft.watchStack(stackID, 90)
+	stack, err := ft.watchStack(response.StackId, 90)
 	if err != nil {
 		return err
 	}
@@ -388,11 +381,10 @@ func (ft *FlipTester) CreateStack() (err error) {
 }
 
 func (ft *FlipTester) getStackInfo() (err error) {
-	svc := cloudformation.New(ft.sess)
 	input := cloudformation.DescribeStacksInput{
 		StackName: &ft.StackName,
 	}
-	response, err := svc.DescribeStacks(&input)
+	response, err := ft.cfSvc.DescribeStacks(&input)
 	if err != nil {
 		return err
 	}
@@ -429,10 +421,9 @@ func (ft *FlipTester) Test() (err error) {
 		}
 	}
 	if ft.stackCreated {
-		duration := time.Second * time.Duration(float64(ft.initialSleepTimeSeconds))
 		msg = fmt.Sprintf("sleeping %d seconds before calling lambda", ft.initialSleepTimeSeconds)
 		ft.logMessage(msg)
-		time.Sleep(duration)
+		time.Sleep(time.Second * time.Duration(ft.initialSleepTimeSeconds))
 		msg = "calling lambda"
 		ft.logMessage(msg)
 		err = ft.callLamda()
@@ -446,8 +437,7 @@ func (ft *FlipTester) Test() (err error) {
 					// was ready
 					msg = "service exception, sleeping and trying lambda again"
 					ft.logMessage(msg)
-					duration := time.Second * time.Duration(float64(10))
-					time.Sleep(duration)
+					time.Sleep(10 * time.Second)
 					err = ft.callLamda()
 				}
 			}
@@ -469,7 +459,7 @@ func (ft *FlipTester) Test() (err error) {
 		ft.logMessage(msg)
 	}
 	if err != nil {
-		msg := fmt.Sprintf("errors: %s", err.Error())
+		msg = fmt.Sprintf("errors: %s", err.Error())
 		ft.logMessage(msg)
 		return err
 	}
@@ -484,52 +474,30 @@ func (ft *FlipTester) GetLog() string {
 	return strings.Join(ft.log, "\n")
 }
 
-func (ft *FlipTester) watchStack(
-	stackID *string,
-	maxtries int) (stack *cloudformation.Stack,
-	err error) {
-	svc := cloudformation.New(ft.sess)
+func (ft *FlipTester) watchStack(stackID *string, maxtries int) (*cloudformation.Stack, error) {
 	input := cloudformation.DescribeStacksInput{
 		StackName: stackID,
 	}
-	count := 0
-	for {
-		count++
-		if count > maxtries {
-			break
-		}
-		msg := "waiting on stack"
-		ft.logMessage(msg)
-
-		result, err := svc.DescribeStacks(&input)
-		if err != nil {
-			return stack, err
-		}
-		if len(result.Stacks) > 0 {
-			stack = result.Stacks[0]
-			status := *stack.StackStatus
-			switch status {
-			case "CREATE_COMPLETE":
-				return stack, err
-			case "ROLLBACK_IN_PROGRESS":
-				return stack, err
-			case "ROLLBACK_COMPLETE":
-				return stack, err
-			case "DELETE_IN_PROGRESS":
-				return stack, err
-			case "DELETE_COMPLETE":
-				return stack, err
-			case "CREATE_FAILED":
-				return stack, err
-			case "DELETE_FAILED":
-				return stack, err
-			}
-		} else {
-			err = errors.New("not enough stacks in describe")
-			return stack, err
-		}
-		duration := time.Second * time.Duration(float64(10))
-		time.Sleep(duration)
+	err := ft.cfSvc.WaitUntilStackExistsWithContext(context.Background(), &input,
+		request.WithWaiterDelay(request.ConstantWaiterDelay(5*time.Second)),
+		request.WithWaiterMaxAttempts(5),
+	)
+	if err != nil {
+		return nil, err
 	}
-	return stack, err
+	msg := "found stack; awaiting completion"
+	ft.logMessage(msg)
+	err = ft.cfSvc.WaitUntilStackCreateCompleteWithContext(context.Background(), &input,
+		request.WithWaiterDelay(request.ConstantWaiterDelay(10*time.Second)),
+		request.WithWaiterMaxAttempts(maxtries),
+	)
+	if err != nil {
+		return nil, err
+	}
+	result, err := ft.cfSvc.DescribeStacks(&input)
+	if err != nil {
+		return nil, err
+	}
+	stack := result.Stacks[0]
+	return stack, nil
 }
